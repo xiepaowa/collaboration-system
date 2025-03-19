@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC Chat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+</head>
+<body>
+<h1>WebRTC Chat</h1>
+<button onclick="startCall()">Start Call</button>
+<video id="localVideo" autoplay playsinline></video>
+<video id="remoteVideo" autoplay playsinline></video>
+<input type="text" id="message" placeholder="Type a message" required>
+<button onclick="sendMessage()">Send</button>
+<ul id="messages"></ul>
+<script>
+  let stompClient = null;
+  let localStream;
+  let peerConnection;
+  const config = { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] };
+
+  function connect() {
+    const socket = new SockJS('/chat-websocket');
+    stompClient = Stomp.over(socket);
+    stompClient.connect({}, function (frame) {
+      stompClient.subscribe('/topic/messages', function (messageOutput) {
+        showMessageOutput(JSON.parse(messageOutput.body));
+      });
+      stompClient.subscribe('/topic/webrtc/offer', function (signal) {
+        handleSignal(JSON.parse(signal.body));
+      });
+      stompClient.subscribe('/topic/webrtc/answer', function (signal) {
+        handleSignal(JSON.parse(signal.body));
+      });
+      stompClient.subscribe('/topic/webrtc/candidate', function (signal) {
+        handleSignal(JSON.parse(signal.body));
+      });
+    });
+  }
+
+  function sendMessage() {
+    const message = document.getElementById('message').value;
+    stompClient.send("/app/sendMessage", {}, JSON.stringify({ 'content': message }));
+  }
+
+  function showMessageOutput(message) {
+    const response = document.getElementById('messages');
+    const li = document.createElement('li');
+    li.appendChild(document.createTextNode(message.content));
+    response.appendChild(li);
+  }
+
+  function startCall() {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+              localStream = stream;
+              document.getElementById('localVideo').srcObject = stream;
+
+              peerConnection = new RTCPeerConnection(config);
+              peerConnection.addStream(localStream);
+
+              peerConnection.onaddstream = event => {
+                document.getElementById('remoteVideo').srcObject = event.stream;
+              };
+
+              peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                  sendSignal({ 'type': 'candidate', 'candidate': event.candidate });
+                }
+              };
+
+              peerConnection.createOffer()
+                      .then(offer => {
+                        return peerConnection.setLocalDescription(offer);
+                      })
+                      .then(() => {
+                        sendSignal({ 'type': 'offer', 'sdp': peerConnection.localDescription });
+                      });
+            });
+  }
+
+  function handleSignal(signal) {
+    if (signal.type === 'offer') {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+              .then(() => {
+                return peerConnection.createAnswer();
+              })
+              .then(answer => {
+                return peerConnection.setLocalDescription(answer);
+              })
+              .then(() => {
+                sendSignal({ 'type': 'answer', 'sdp': peerConnection.localDescription });
+              });
+    } else if (signal.type === 'answer') {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+    } else if (signal.type === 'candidate') {
+      peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+    }
+  }
+
+  function sendSignal(signal) {
+    stompClient.send("/app/webrtc/" + signal.type, {}, JSON.stringify(signal));
+  }
+
+  connect();
+</script>
+</body>
+</html>

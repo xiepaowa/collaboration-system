@@ -18,4 +18,5 @@ public class Message {
     private String groupId;
     private String content;
     private Long timestamp;
+    private String userId;
 }
