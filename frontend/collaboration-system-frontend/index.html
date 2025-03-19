@@ -1,13 +1,74 @@
 <!DOCTYPE html>
-<html lang="">
-  <head>
-    <meta charset="UTF-8">
-    <link rel="icon" href="/favicon.ico">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vite App</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC Chat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+</head>
+<body>
+<h1>WebRTC Chat</h1>
+<button onclick="startCall()">Start Call</button>
+<video id="localVideo" autoplay playsinline></video>
+<video id="remoteVideo" autoplay playsinline></video>
+<script>
+  let localStream;
+  let peerConnection;
+  const config = { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] };
+
+  function startCall() {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+              localStream = stream;
+              document.getElementById('localVideo').srcObject = stream;
+
+              peerConnection = new RTCPeerConnection(config);
+              peerConnection.addStream(localStream);
+
+              peerConnection.onaddstream = event => {
+                document.getElementById('remoteVideo').srcObject = event.stream;
+              };
+
+              peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                  sendSignal({ 'type': 'candidate', 'candidate': event.candidate });
+                }
+              };
+
+              peerConnection.createOffer()
+                      .then(offer => {
+                        return peerConnection.setLocalDescription(offer);
+                      })
+                      .then(() => {
+                        sendSignal({ 'type': 'offer', 'sdp': peerConnection.localDescription });
+                      });
+            });
+  }
+
+  function handleSignal(signal) {
+    if (signal.type === 'offer') {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+              .then(() => {
+                return peerConnection.createAnswer();
+              })
+              .then(answer => {
+                return peerConnection.setLocalDescription(answer);
+              })
+              .then(() => {
+                sendSignal({ 'type': 'answer', 'sdp': peerConnection.localDescription });
+              });
+    } else if (signal.type === 'answer') {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+    } else if (signal.type === 'candidate') {
+      peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+    }
+  }
+
+  function sendSignal(signal) {
+    // Implement WebSocket or HTTP POST to send signal to server
+  }
+
+  // Implement WebSocket connection and message handling
+</script>
+</body>
 </html>
